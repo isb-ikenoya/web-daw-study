@@ -1,5 +1,5 @@
 import DawEditor from "@/components/DawEditor";
-import Sidebar from "@/components/Sidebar";
+import Sidebar from "@/components/AppSidebar";
 import SplitArea from "@/components/SplitArea";
 
 const EditorPage = () => {

@@ -8,13 +8,11 @@ const SidebarContainer = styled(Box)({
   boxSizing: "border-box",
   display: "flex",
   flexFlow: "row",
-  backgroundColor: "green"
+  backgroundColor: "green",
 });
 
-const Sidebar = () => {
-  return(
-    <SidebarContainer/>
-  )
-}
+const AppSidebar = () => {
+  return <SidebarContainer />;
+};
 
-export default Sidebar;
+export default AppSidebar;
