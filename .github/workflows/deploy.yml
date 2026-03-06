@@ -1,0 +1,48 @@
+name: Deploy to S3
+
+on:
+  push:
+    branches:
+      - develop
+
+env:
+  # GitHubActionsOIDCRole：作成したIAMロール名
+  AWS_ROLE_ARN: arn:aws:iam::374474405705:role/GitHubActionsOIDCRole-ikenoya
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # チェックアウトするアクション
+      - uses: actions/checkout@v4
+      # 特定バージョンのnodeを設定するアクション
+      - name: Use NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24 # 24系バージョン追従
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+      # dependencyのクリーンインストール
+      - run: pnpm install --frozen-lockfile
+      # ビルド
+      - run: pnpm run build
+      # awsへのアクセス情報を設定
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      # S3にビルドしたものをアップロード
+      - run: aws s3 sync dist s3://web-daw-dev-bucket/ --delete
