@@ -91,7 +91,7 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
   //const { addTrack } = useTrackDataStore();
   const audioCtxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
-  const activeSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const activeSourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
   const startTime = useRef<number>(0);
 
   // AudioContextを取得、または生成するヘルパー関数
@@ -107,6 +107,11 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
 
     return audioCtxRef.current;
   }, []);
+
+  const getCurrentTime = useCallback((): number => {
+    if (!isPlay || !audioCtxRef.current) return 0;
+    return audioCtxRef.current.currentTime - startTime.current;
+  }, [isPlay]);
 
   const addTrack = useCallback(() => {
     if (!audioCtxRef.current) return;
@@ -171,19 +176,56 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
         const note = track.notes.get(noteId);
         if (!note) return prev;
 
-        // 座標から時間に変換（逆算関数の呼び出し）
         const newWhen = convertPositionToStartTime(fixedPosX);
+        const newNote = { ...note, posX: fixedPosX, when: newWhen };
 
         const newNotes = new Map(track.notes);
-        newNotes.set(noteId, { ...note, posX: fixedPosX, when: newWhen });
+        newNotes.set(noteId, newNote);
 
         const newTracks = new Map(prev);
         newTracks.set(trackId, { ...track, notes: newNotes });
+
+        // ★ 再生中の個別スケジュール更新
+        if (isPlay) {
+          const ctx = getContext();
+          if (ctx) {
+            const currentProgress = getCurrentTime();
+
+            // 1. 動かしたノートの「古い再生予約」があれば止める
+            const oldSource = activeSourcesRef.current.get(noteId);
+            if (oldSource) {
+              try {
+                oldSource.stop();
+              } catch (e) {
+                console.error(e);
+              }
+              oldSource.disconnect();
+              activeSourcesRef.current.delete(noteId);
+            }
+
+            // 2. 「新しい位置」が現在時刻より未来であれば、新しく予約する
+            if (newWhen >= currentProgress) {
+              const source = ctx.createBufferSource();
+              if (newNote.audioBuffer) {
+                source.buffer = newNote.audioBuffer;
+                source.connect(track.trackNode);
+
+                // startTime.current を基準にした新位置で開始
+                source.start(startTime.current + newWhen, 0);
+
+                // 新しい Node を登録
+                activeSourcesRef.current.set(noteId, source);
+                source.onended = () => activeSourcesRef.current.delete(noteId);
+              }
+            }
+          }
+        }
+
         return newTracks;
       });
       return tracks;
     },
-    [tracks]
+    [isPlay, getCurrentTime, getContext, tracks]
   );
 
   const getTracksInfo = useCallback(() => {
@@ -243,44 +285,63 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
 
       setIsPlay(true);
       startTime.current = ctx.currentTime;
+
       let maxDuration = 0;
-      let lastSource: AudioBufferSourceNode | null = null;
-      const newSources: AudioBufferSourceNode[] = [];
+      //let lastSource: AudioBufferSourceNode | null = null;
+
+      // 以前のソースが残っている場合は念のためクリア
+      activeSourcesRef.current.forEach((s) => {
+        try {
+          s.stop();
+        } catch (e) {
+          console.error(e);
+        }
+        s.disconnect();
+      });
+      activeSourcesRef.current.clear();
 
       tracks.forEach((track) => {
         track.notes.forEach((note) => {
           if (!note.audioBuffer) return;
+
+          // SourceNodeの作成と接続
           const source = ctx.createBufferSource();
           source.buffer = note.audioBuffer;
           source.connect(track.trackNode);
-          const startTime = ctx.currentTime + note.when;
 
-          const endTime = startTime + note.audioBuffer.duration;
+          // 再生スケジュールの計算
+          const nodeStartTime = startTime.current + note.when;
+          const nodeEndTime = nodeStartTime + note.audioBuffer.duration;
 
-          // 一番最後に終わる時間を記録
-          if (endTime > maxDuration) {
-            maxDuration = endTime;
-            lastSource = source;
+          // Mapに保存 (後で個別操作できるように)
+          activeSourcesRef.current.set(note.id, source);
+
+          // 一番最後に終わる時間を記録（isPlayの自動オフ用）
+          if (nodeEndTime > maxDuration) {
+            maxDuration = nodeEndTime;
+            //lastSource = source;
           }
 
-          source.start(ctx.currentTime + note.when, 0);
-          newSources.push(source);
+          // 再生終了時のクリーンアップ
+          source.onended = () => {
+            // 自分のIDをMapから削除
+            activeSourcesRef.current.delete(note.id);
+
+            // 全ての音が鳴り終わったら再生状態を解除
+            /*if (activeSourcesRef.current.size === 0) {
+              setIsPlay(false);
+            }*/
+          };
+
+          // 発音予約
+          source.start(nodeStartTime, 0);
         });
       });
 
-      // 最後のノードが終了したら isPlay を false にする
-      if (lastSource) {
-        (lastSource as AudioBufferSourceNode).onended = () => {
-          // すべてのソースが止まったことを保証するため、一応 stopAll を呼ぶ
-          setIsPlay(false);
-          activeSourcesRef.current = [];
-        };
-      } else {
-        // 再生するものが何もない場合
+      // 再生するものがない場合
+      if (activeSourcesRef.current.size === 0) {
         setIsPlay(false);
       }
-
-      activeSourcesRef.current = newSources;
     },
     [getContext, initialize]
   );
@@ -296,7 +357,7 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
       source.disconnect();
     });
     // リストを空にする
-    activeSourcesRef.current = [];
+    activeSourcesRef.current.clear();
     setIsPlay(false);
   }, []);
 
@@ -389,11 +450,6 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
     },
     [tracks]
   );
-
-  const getCurrentTime = useCallback((): number => {
-    if (!isPlay || !audioCtxRef.current) return 0;
-    return audioCtxRef.current.currentTime - startTime.current;
-  }, [isPlay]);
 
   useEffect(() => {
     const initializeAudio = async () => {

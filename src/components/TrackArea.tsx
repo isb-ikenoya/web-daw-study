@@ -43,7 +43,6 @@ interface TrackNoteProps {
   color: number;
   posX: number;
   duration: number;
-  dragStart: (event: PIXI.FederatedPointerEvent) => void;
 }
 
 interface TrackListProps {
@@ -85,7 +84,7 @@ const TrackContainer = memo(({ posY, width, children }: TrackContainerProps) => 
 // 3. トラックコンテンツ (中身)
 // ==========================================
 const TrackNote = memo((props: TrackNoteProps) => {
-  const { trackId, noteId, noteName, color, posX, duration, dragStart } = props;
+  const { trackId, noteId, noteName, color, posX, duration } = props;
   const { commitNotePosition } = useAudio();
 
   // 1. PixiJS の Container インスタンスへの参照
@@ -200,9 +199,6 @@ const TrackNote = memo((props: TrackNoteProps) => {
 
 const TrackList = memo(({ width, tracks }: TrackListProps) => {
   const unitHeight = TRACK_HEIGHT + TRACK_BORDER_HEIGHT;
-  const dragStart = useCallback((event: PIXI.FederatedPointerEvent) => {
-    console.log(event);
-  }, []);
 
   return (
     <Container>
@@ -226,7 +222,6 @@ const TrackList = memo(({ width, tracks }: TrackListProps) => {
                         color={0xff0000}
                         posX={convertStartTimeToPosition(note.when)}
                         duration={note.audioBuffer?.duration ?? 0}
-                        dragStart={dragStart}
                       />
                     );
                   }
