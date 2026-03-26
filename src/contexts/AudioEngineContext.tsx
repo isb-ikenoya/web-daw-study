@@ -148,10 +148,11 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
           return prev;
         }
         const newNoteId = crypto.randomUUID();
+        const when = convertPositionToStartTime(posX);
         const newNote: AudioNote = {
           id: newNoteId,
           noteName: noteName,
-          when: convertPositionToStartTime(posX),
+          when: when,
           posX: posX,
           audioBuffer: audioBuffer,
         };
@@ -161,11 +162,35 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
         newNotes.set(newNoteId, newNote);
         updatedTrack.notes = newNotes;
         newTracks.set(trackId, updatedTrack);
+
+        // ★ 再生中の個別スケジュール更新
+        if (isPlay) {
+          const ctx = getContext();
+          if (ctx) {
+            const currentProgress = getCurrentTime();
+
+            // 2. 「新しい位置」が現在時刻より未来であれば、新しく予約する
+            if (when >= currentProgress) {
+              const source = ctx.createBufferSource();
+              if (newNote.audioBuffer) {
+                source.buffer = newNote.audioBuffer;
+                source.connect(targetTrack.trackNode);
+
+                // startTime.current を基準にした新位置で開始
+                source.start(startTime.current + when, 0);
+
+                // 新しい Node を登録
+                activeSourcesRef.current.set(newNoteId, source);
+                source.onended = () => activeSourcesRef.current.delete(newNoteId);
+              }
+            }
+          }
+        }
         return newTracks;
       });
       return tracks;
     },
-    [tracks]
+    [tracks, getContext, getCurrentTime, isPlay]
   );
 
   const commitNotePosition = useCallback(
