@@ -1,5 +1,5 @@
 import { Container, Graphics, Text } from "@pixi/react";
-import { Fragment, memo, useCallback, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useRef, type ReactNode } from "react";
 import * as PIXI from "pixi.js";
 import {
   TRACK_AREA_OFFSET_Y,
@@ -13,6 +13,7 @@ import {
 import { AudioNote, AudioTrack } from "@/types/project";
 import { convertDurationToPixel, convertStartTimeToPosition } from "@/util/projectSettings";
 import { TrackSeparator } from "./PixiTrackComponents";
+import { useAudio } from "@/contexts/AudioEngineContext";
 
 // ==========================================
 // 定数定義 (親コンポーネントでも計算に使うため export します)
@@ -36,10 +37,13 @@ interface TrackContainerProps {
 }
 
 interface TrackNoteProps {
+  trackId: string;
+  noteId: string;
   noteName: string;
   color: number;
   posX: number;
   duration: number;
+  dragStart: (event: PIXI.FederatedPointerEvent) => void;
 }
 
 interface TrackListProps {
@@ -80,7 +84,73 @@ const TrackContainer = memo(({ posY, width, children }: TrackContainerProps) => 
 // ==========================================
 // 3. トラックコンテンツ (中身)
 // ==========================================
-const TrackNote = memo(({ noteName, color, posX, duration }: TrackNoteProps) => {
+const TrackNote = memo((props: TrackNoteProps) => {
+  const { trackId, noteId, noteName, color, posX, duration, dragStart } = props;
+  const { commitNotePosition } = useAudio();
+
+  // 1. PixiJS の Container インスタンスへの参照
+  const containerRef = useRef<PIXI.Container>(null);
+
+  // ドラッグ管理用の変数 (レンダリングに影響させない)
+  const dragData = useRef<{ isDragging: boolean; startX: number; dragStartX: number } | null>(null);
+
+  const onDragMove = useCallback(
+    (event: PIXI.FederatedPointerEvent) => {
+      if (!dragData.current || !dragData.current.isDragging || !containerRef.current) return;
+
+      // 1. 親コンテナ内でのマウス位置を取得
+      const localPos = event.getLocalPosition(containerRef.current.parent);
+
+      // 2. 移動量の計算
+      const deltaX = localPos.x - dragData.current.startX;
+      let newX = dragData.current.dragStartX + deltaX;
+
+      // 3. 範囲の制限 (クランプ)
+      // ノートの幅を取得 (durationから計算するか、Graphicsの幅を使用)
+      const noteWidth = convertDurationToPixel(duration);
+      const minX = 0 - TRACK_HEADER_WIDTH; // 左端 (0秒地点)
+      const maxX = TRACK_CONTAINER_WIDTH - noteWidth; // 右端
+
+      // newX を minX と maxX の間に収める
+      newX = Math.max(minX, Math.min(newX, maxX));
+
+      // 4. 直接座標を更新
+      containerRef.current.x = newX;
+    },
+    [duration]
+  ); // duration が変わった場合も考慮
+
+  const onDragStart = useCallback(
+    (event: PIXI.FederatedPointerEvent) => {
+      if (!containerRef.current) return;
+
+      // 現在のマウス位置を取得
+      const localPos = event.getLocalPosition(containerRef.current.parent);
+
+      dragData.current = {
+        isDragging: true,
+        startX: localPos.x,
+        dragStartX: containerRef.current.x,
+      };
+
+      // イベントをこのオブジェクトで固定する（画面外に出ても追跡するため）
+      event.currentTarget.on("pointermove", onDragMove);
+    },
+    [onDragMove]
+  );
+
+  const onDragEnd = useCallback(() => {
+    if (!dragData.current || !containerRef.current) return;
+
+    // 3. ドラッグ終了時に React の State に最終座標を反映させる
+    const finalX = containerRef.current.x + TRACK_HEADER_WIDTH;
+    commitNotePosition(trackId, noteId, finalX); // ここで初めて再描画が走る
+
+    dragData.current.isDragging = false;
+    // イベント解除
+    containerRef.current.off("pointermove", onDragMove);
+  }, [trackId, noteId, commitNotePosition, onDragMove]);
+
   console.log("再描画", noteName);
   const width = convertDurationToPixel(duration);
   const drawRect = useCallback(
@@ -94,7 +164,15 @@ const TrackNote = memo(({ noteName, color, posX, duration }: TrackNoteProps) => 
   );
 
   return (
-    <Container position={[posX, 0]}>
+    <Container
+      ref={containerRef}
+      position={[posX, 0]}
+      pointerdown={onDragStart}
+      pointerup={onDragEnd}
+      pointerupoutside={onDragEnd}
+      eventMode="static"
+      cursor="pointer"
+    >
       <Graphics draw={drawRect} />
       <Text
         text={noteName}
@@ -122,6 +200,9 @@ const TrackNote = memo(({ noteName, color, posX, duration }: TrackNoteProps) => 
 
 const TrackList = memo(({ width, tracks }: TrackListProps) => {
   const unitHeight = TRACK_HEIGHT + TRACK_BORDER_HEIGHT;
+  const dragStart = useCallback((event: PIXI.FederatedPointerEvent) => {
+    console.log(event);
+  }, []);
 
   return (
     <Container>
@@ -139,10 +220,13 @@ const TrackList = memo(({ width, tracks }: TrackListProps) => {
                     return (
                       <TrackNote
                         key={note.id}
+                        trackId={track.id}
+                        noteId={note.id}
                         noteName={note.noteName}
                         color={0xff0000}
                         posX={convertStartTimeToPosition(note.when)}
                         duration={note.audioBuffer?.duration ?? 0}
+                        dragStart={dragStart}
                       />
                     );
                   }

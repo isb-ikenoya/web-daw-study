@@ -1,4 +1,5 @@
 import { AudioNote, AudioTrack } from "@/types/project";
+import { convertPositionToStartTime } from "@/util/projectSettings";
 import {
   createContext,
   useContext,
@@ -25,9 +26,14 @@ export interface AudioContextType {
   deleteTrack: (id: string) => void;
   addNote: (
     trackId: string,
-    when: number,
+    posX: number,
     noteName: string,
     audioBuffer: AudioBuffer
+  ) => Map<string, AudioTrack>;
+  commitNotePosition: (
+    trackId: string,
+    noteId: string,
+    fixedPosX: number
   ) => Map<string, AudioTrack>;
   getTracksInfo: () => Map<string, AudioTrack>;
   getTrackFromIndex: (index: number) => AudioTrack;
@@ -130,7 +136,7 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const addNote = useCallback(
-    (trackId: string, when: number, noteName: string, audioBuffer: AudioBuffer) => {
+    (trackId: string, posX: number, noteName: string, audioBuffer: AudioBuffer) => {
       setTracks((prev) => {
         const targetTrack = prev.get(trackId);
         if (!targetTrack) {
@@ -140,7 +146,8 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
         const newNote: AudioNote = {
           id: newNoteId,
           noteName: noteName,
-          when: when,
+          when: convertPositionToStartTime(posX),
+          posX: posX,
           audioBuffer: audioBuffer,
         };
         const newTracks = new Map(prev);
@@ -149,6 +156,29 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
         newNotes.set(newNoteId, newNote);
         updatedTrack.notes = newNotes;
         newTracks.set(trackId, updatedTrack);
+        return newTracks;
+      });
+      return tracks;
+    },
+    [tracks]
+  );
+
+  const commitNotePosition = useCallback(
+    (trackId: string, noteId: string, fixedPosX: number) => {
+      setTracks((prev) => {
+        const track = prev.get(trackId);
+        if (!track) return prev;
+        const note = track.notes.get(noteId);
+        if (!note) return prev;
+
+        // 座標から時間に変換（逆算関数の呼び出し）
+        const newWhen = convertPositionToStartTime(fixedPosX);
+
+        const newNotes = new Map(track.notes);
+        newNotes.set(noteId, { ...note, posX: fixedPosX, when: newWhen });
+
+        const newTracks = new Map(prev);
+        newTracks.set(trackId, { ...track, notes: newNotes });
         return newTracks;
       });
       return tracks;
@@ -387,6 +417,7 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
       addTrack,
       deleteTrack,
       addNote,
+      commitNotePosition,
       getTracksInfo,
       getTrackFromIndex,
       getNoteById,
@@ -405,6 +436,7 @@ const AudioEngineProvider = ({ children }: { children: ReactNode }) => {
       addTrack,
       deleteTrack,
       addNote,
+      commitNotePosition,
       getTracksInfo,
       getTrackFromIndex,
       getNoteById,

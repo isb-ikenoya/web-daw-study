@@ -14,7 +14,6 @@ import {
   TRACK_HEIGHT,
 } from "@/util/trackSettings";
 import { AudioContext, useAudio } from "@/contexts/AudioEngineContext";
-import { convertPositionToStartTime } from "@/util/projectSettings";
 import { VirtualHorizontalScrollbar } from "./VirtualHorizontalScrollbar";
 import TrackHeaderArea from "./TrackHeaderArea";
 import PlaybackHead from "./PlaybackHead";
@@ -163,7 +162,7 @@ const DawEditor = () => {
       // AudioBuffer変換
       try {
         const audioBuffer = await getAudioBufferFromFile(file);
-        addNote(currentTrack.id, convertPositionToStartTime(droppedX), file.name, audioBuffer);
+        addNote(currentTrack.id, droppedX, file.name, audioBuffer);
       } catch (err) {
         alert(err);
       } finally {

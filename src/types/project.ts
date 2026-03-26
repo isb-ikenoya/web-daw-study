@@ -12,6 +12,7 @@ export interface AudioNote {
   id: string;
   noteName: string;
   when: number;
+  posX: number; // 移動中はrefで操作し、確定後更新
   audioBuffer?: AudioBuffer;
 }
 
